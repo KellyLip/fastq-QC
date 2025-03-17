@@ -35,7 +35,7 @@ Now you are in the folder that contains the `environment.yml` file.
 Make sure you have Conda installed (Miniconda or Anaconda). Once in your repository folder, type:
 
 ```bash
-conda env create -f environment.yml
+conda env create -f CreateEnvironment/environment.yml
 ```
 
 This command tells Conda to create a new environment using the list of tools and packages defined in `environment.yml`. The environment is fastq-qc.
