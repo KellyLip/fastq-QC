@@ -1,0 +1,10 @@
+name: fastq-qc
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - fastqc
+  - trimmomatic
+  - fastuniq
+  - flash
