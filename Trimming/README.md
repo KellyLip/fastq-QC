@@ -1,23 +1,10 @@
 # Trimming FASTQ Files
 
-This folder explains how to trim your FASTQ files based on:
+This README file explains how to trim your FASTQ files based on:
 1. **Quality Control Results** (from FastQC or another QC tool).
 2. **Known Adapter Sequences** listed in `adapters.fa`.
 
 By trimming reads, you remove low-quality regions and adapter contamination, improving the accuracy of downstream analyses such as alignment or assembly.
-
----
-
-## Table of Contents
-
-1. [Overview](#overview)
-2. [Prerequisites](#prerequisites)
-3. [Step 1: Review FASTQC Results](#step-1-review-fastqc-results)
-4. [Step 2: Choose Your Trimming Tool](#step-2-choose-your-trimming-tool)
-5. [Step 3: Trimming Single-End Reads](#step-3-trimming-single-end-reads)
-6. [Step 4: Trimming Paired-End Reads](#step-4-trimming-paired-end-reads)
-7. [Troubleshooting](#troubleshooting)
-8. [Further Reading](#further-reading)
 
 ---
 
@@ -80,6 +67,7 @@ Below is a detailed explanation of three tools/parameters often used alongside o
 - **SLIDINGWINDOW** (a Trimmomatic parameter)  
 - **FLASH** (for merging paired-end reads)  
 - **fastuniq** (for removing duplicate reads)
+- **MINLEN** (discards excessively short reads)
 
 We’ll also cover how to choose parameters and what to look for in the FastQC reports to guide your trimming and merging decisions.
 
@@ -174,50 +162,63 @@ Other parameters include:
   - Some pipelines prefer duplicate marking at the alignment stage (e.g., using `samtools markdup` or `Picard MarkDuplicates`), rather than removing them in FASTQ form. Clarify your analysis goals before deciding.
 
 ---
+## 4. MINLEN
 
-## Putting It All Together with FastQC
+### What Is It?
 
-**Before** using SLIDINGWINDOW, FLASH, or fastuniq, you’ll typically run FastQC to see:
-- Where quality declines (use **SLIDINGWINDOW** or other Trimmomatic parameters to trim).
-- Whether reads overlap significantly (use **FLASH** to merge pairs if appropriate).
-- Whether duplication is high (use **fastuniq** to remove duplicates if needed).
+`MINLEN` is a Trimmomatic parameter that specifies the **minimum read length** required after all other trimming steps (e.g., removing adapters or low-quality bases). Any reads that end up shorter than this threshold are discarded entirely. This helps ensure that extremely short reads—which usually contain minimal usable information—do not pass into downstream analysis.
 
-**After** applying these tools, it’s a good idea to run FastQC again to confirm:
-- Quality scores are improved (no more low-quality tails).
-- Adapter contamination is gone.
-- Sequence duplication is reduced if you removed duplicates.
-- Merged reads look reasonable (if you used FLASH).
+### Typical Syntax
 
----
+When you run Trimmomatic, you might see a command like:
+```bash
+trimmomatic SE -threads 4 \
+  input.fastq.gz \
+  output_trimmed.fastq.gz \
+  ILLUMINACLIP:adapters.fa:2:30:10 SLIDINGWINDOW:4:20 MINLEN:50
+```
 
-## Example Workflow
+- **MINLEN:50** means any read that is fewer than 50 bases long after the trimming process is discarded.
 
-1. **Run FastQC** on raw files:
-   ```
-   fastqc *.fastq.gz
-   ```
-2. **Trim** low-quality bases and adapters (Trimmomatic):
-   ```
-   trimmomatic PE -threads 4 \
-     sample_R1.fastq.gz sample_R2.fastq.gz \
-     sample_R1_paired.fastq.gz sample_R1_unpaired.fastq.gz \
-     sample_R2_paired.fastq.gz sample_R2_unpaired.fastq.gz \
-     ILLUMINACLIP:adapters.fa:2:30:10 SLIDINGWINDOW:4:20 MINLEN:50
-   ```
-3. **Merge Overlapping Reads** (FLASH), if insert size is smaller than read lengths:
-   ```
-   flash sample_R1_paired.fastq.gz sample_R2_paired.fastq.gz -o sample_merged -M 250
-   ```
-4. **Remove Duplicates** (fastuniq), if duplication is high:
-   ```
-   # 1) Create a file list
-   echo "sample_R1_paired.fastq.gz" > fastuniq_input.txt
-   echo "sample_R2_paired.fastq.gz" >> fastuniq_input.txt
+### How to Choose the MINLEN Value
 
-   # 2) Run fastuniq
-   fastuniq -i fastuniq_input.txt -t q -o sample_R1_dedup.fastq.gz -p sample_R2_dedup.fastq.gz
-   ```
-5. **Re-run FastQC** on the final FASTQ files to confirm improvements.
+1. **Consider Your Original Read Length**  
+   - If your reads are 150 bp (bases) each, dropping down to 50 bp still retains ~33% of the read length.  
+   - If your reads are only 75 bp to start with, you might choose a lower threshold (e.g., MINLEN:36) to retain enough reads.
+
+2. **Review “Sequence Length Distribution” in FastQC**  
+   - If most reads remain fairly long even after trimming, you can afford a higher `MINLEN` (e.g., 50 or 75).  
+   - If you see that many reads would drop below a certain length (e.g., 30–40 bp) after trimming poor-quality tails, you might opt for a slightly lower `MINLEN` to retain enough data, while still removing uninformative short reads.
+
+3. **Downstream Application Requirements**  
+   - **Alignment or Assembly**: Some aligners work better with reads above a certain length (e.g., 50 bp).  
+   - **Coverage Considerations**: If discarding too many reads drastically reduces your coverage, you might want to choose a more lenient threshold.  
+   - **Amplicon or Targeted Sequencing**: If you know your amplicons are short, you may need a lower `MINLEN`.
+
+4. **Experiment and Validate**  
+   - Run Trimmomatic with a chosen `MINLEN`, then re-run FastQC on the trimmed reads.  
+   - Check if you still meet your desired coverage or read quality metrics.
+
+### Example Command with MINLEN
+
+**Single-End Example:**
+```bash
+trimmomatic SE -threads 4 \
+  input.fastq.gz \
+  output_trimmed.fastq.gz \
+  ILLUMINACLIP:adapters.fa:2:30:10 SLIDINGWINDOW:4:20 MINLEN:50
+```
+
+**Paired-End Example:**
+```bash
+trimmomatic PE -threads 4 \
+  sample_R1.fastq.gz sample_R2.fastq.gz \
+  sample_R1_paired.fastq.gz sample_R1_unpaired.fastq.gz \
+  sample_R2_paired.fastq.gz sample_R2_unpaired.fastq.gz \
+  ILLUMINACLIP:adapters.fa:2:30:10 SLIDINGWINDOW:4:20 MINLEN:50
+```
+
+- Here, `MINLEN:50` discards any read (or read pair) that ends up below 50 bp after all other trimming operations.
 
 ---
 
@@ -226,110 +227,147 @@ Other parameters include:
 - **SLIDINGWINDOW**: A Trimmomatic parameter that trims low-quality regions in a step-wise manner.
 - **FLASH**: Merges paired-end reads that overlap, commonly used for short-insert or amplicon libraries.
 - **fastuniq**: Removes duplicate reads to reduce bias from PCR over-amplification or optical duplicates.
+- **MINLEN** discards excessively short reads that remain after adapter/quality trimming.
 
-By examining the relevant FastQC modules—**Per Base Sequence Quality**, **Sequence Duplication Levels**, and **Sequence Length Distribution**—you can decide which tools to use and how to set their parameters. Always validate your changes by running FastQC again to ensure your data quality has improved and you haven’t lost valuable information.
-## Step 3: Trimming Single-End Reads
+---
+## Workflow ##
 
-For single-end data (one FASTQ file per sample), here’s a typical **Trimmomatic** command:
-
-```bash
-trimmomatic SE -threads 4 \
-  input_reads.fastq.gz \
-  trimmed_reads.fastq.gz \
-  ILLUMINACLIP:adapters.fa:2:30:10 MINLEN:36
-```
-
-- **SE**: Single-end mode.
-- **-threads 4**: Use 4 threads (adjust as needed).
-- **ILLUMINACLIP:adapters.fa:2:30:10**: Reference your `adapters.fa`, and set clipping parameters. The numbers (e.g., `2:30:10`) represent mismatches, palindrome clip threshold, and simple clip threshold, respectively.
-- **MINLEN:36**: Discards reads that fall below 36 bases after trimming.
-
-If you want to process **all** single-end FASTQ files in the directory, you can use a loop:
-
-```bash
-for file in *.fastq.gz
-do
-  echo "Trimming $file ..."
-  trimmomatic SE -threads 4 "$file" "trimmed_$file" \
-    ILLUMINACLIP:adapters.fa:2:30:10 MINLEN:36
-done
-```
+Below is a comprehensive example workflow showing how to trim your FASTQ files using **Trimmomatic** with multiple parameters—**ILLUMINACLIP**, **SLIDINGWINDOW**, **MINLEN**—for both single-end and paired-end data. It also includes how to run these commands on **all FASTQ files** in a directory.
 
 ---
 
-## Step 4: Trimming Paired-End Reads
+## Overview
 
-Paired-end data usually comes in files named something like `sample_R1.fastq.gz` and `sample_R2.fastq.gz`. The command is slightly different:
+1. **Single-End Workflow**  
+   - Trims all single-end FASTQ files in the directory.  
+2. **Paired-End Workflow**  
+   - Trims all paired-end files (identified as `_R1` and `_R2`) in the directory.  
+3. **Parameters Explained**  
+   - **ILLUMINACLIP**: Removes adapter sequences using an adapter FASTA file (e.g., `adapters.fa`).  
+   - **SLIDINGWINDOW**: Scans the reads in windows of a specified size and trims if the average quality falls below a threshold.  
+   - **MINLEN**: Discards reads (or read pairs) that fall below a specified length after trimming.  
+
+---
+
+## 1. Single-End Trimming
+
+If your files are **single-end** reads, you typically have one FASTQ file per sample (e.g., `sample.fastq.gz`):
+
+**Shell Script / Terminal Commands**:
 
 ```bash
-trimmomatic PE -threads 4 \
-  sample_R1.fastq.gz sample_R2.fastq.gz \
-  sample_R1_paired.fastq.gz sample_R1_unpaired.fastq.gz \
-  sample_R2_paired.fastq.gz sample_R2_unpaired.fastq.gz \
-  ILLUMINACLIP:adapters.fa:2:30:10 MINLEN:36
+# Loop through all single-end FASTQ files ending in .fastq.gz
+for file in *.fastq.gz; do
+  echo "Processing file: $file"
+  
+  trimmomatic SE -threads 4 \
+    "$file" \
+    "trimmed_$file" \
+    ILLUMINACLIP:adapters.fa:2:30:10 SLIDINGWINDOW:4:20 MINLEN:50
+  
+done
 ```
 
-- **PE**: Paired-end mode.
-- **sample_R1.fastq.gz sample_R2.fastq.gz**: Input files.
-- **sample_R1_paired.fastq.gz sample_R1_unpaired.fastq.gz**: Output for R1 (paired and unpaired reads).
-- **sample_R2_paired.fastq.gz sample_R2_unpaired.fastq.gz**: Output for R2 (paired and unpaired reads).
-- **ILLUMINACLIP:adapters.fa:2:30:10**: Use the adapter sequences in `adapters.fa`.
-- **MINLEN:36**: Discard reads that end up shorter than 36 bases.
+### Explanation
 
-To process **all** paired-end files in your directory:
+- **trimmomatic SE**: Runs Trimmomatic in single-end mode.
+- **-threads 4**: Uses 4 CPU threads (adjust according to your system).
+- **"$file"**: The input FASTQ file (loop variable).
+- **"trimmed_$file"**: The output FASTQ file name is prefixed with `trimmed_`.
+- **ILLUMINACLIP:adapters.fa:2:30:10**:  
+  - Uses `adapters.fa` to remove adapter sequences.  
+  - Parameters `2:30:10` can be adjusted based on how strictly you want to match/truncate adapters.
+- **SLIDINGWINDOW:4:20**:  
+  - A sliding window of size 4 bases.  
+  - Trims when the average quality in that window falls below Q20.
+- **MINLEN:50**:  
+  - Discards reads that end up shorter than 50 bases after trimming.
+
+---
+
+## 2. Paired-End Trimming
+
+If your files are **paired-end**, each sample typically has two FASTQ files, named something like `sample_R1.fastq.gz` and `sample_R2.fastq.gz`.
+
+**Shell Script / Terminal Commands**:
 
 ```bash
-for file in *_R1.fastq.gz
-do
+# Loop through all R1 FASTQ files ending in _R1.fastq.gz
+for file in *_R1.fastq.gz; do
+  # Extract the base name (everything before _R1.fastq.gz)
   base=$(basename "$file" _R1.fastq.gz)
-  echo "Trimming $base ..."
+  
+  echo "Processing sample: $base"
+  
   trimmomatic PE -threads 4 \
     "${base}_R1.fastq.gz" "${base}_R2.fastq.gz" \
     "${base}_R1_paired.fastq.gz" "${base}_R1_unpaired.fastq.gz" \
     "${base}_R2_paired.fastq.gz" "${base}_R2_unpaired.fastq.gz" \
-    ILLUMINACLIP:adapters.fa:2:30:10 MINLEN:36
+    ILLUMINACLIP:adapters.fa:2:30:10 SLIDINGWINDOW:4:20 MINLEN:50
+
 done
 ```
 
----
+### Explanation
 
-## Troubleshooting
-
-1. **Adapter Content Remains High**  
-   - Ensure you’re using the correct adapter file and the right parameters.
-   - Check if your reads need more aggressive trimming (e.g., increasing mismatch thresholds).
-2. **Reads Are Very Short**  
-   - Check if you’re discarding too many bases or if your reads were already short.
-   - Adjust `MINLEN` if needed.
-3. **Quality Scores Still Low**  
-   - Look into whether the data has inherent quality issues not fixable by trimming.
-   - Consider re-checking the new trimmed FASTQ with FastQC to ensure improvement.
+- **trimmomatic PE**: Runs Trimmomatic in paired-end mode.
+- **"${base}_R1.fastq.gz" "${base}_R2.fastq.gz"**: Input R1 and R2 files for the same sample.
+- **"${base}_R1_paired.fastq.gz" "${base}_R1_unpaired.fastq.gz"**: Outputs for R1 (paired reads that remain after trimming and unpaired if one mate is discarded).
+- **"${base}_R2_paired.fastq.gz" "${base}_R2_unpaired.fastq.gz"**: The corresponding outputs for R2.
+- **ILLUMINACLIP:adapters.fa:2:30:10 SLIDINGWINDOW:4:20 MINLEN:50**: Same usage as single-end, just applied to both R1 and R2.
 
 ---
 
-## Further Reading
+## 3. Parameters in Detail
 
-- **[Trimmomatic Documentation](http://www.usadellab.org/cms/?page=trimmomatic)**
-- **[Cutadapt Documentation](https://cutadapt.readthedocs.io/en/stable/)**
-- **[FastQC Documentation](http://www.bioinformatics.babraham.ac.uk/projects/fastqc/)**
+1. **ILLUMINACLIP:adapters.fa:2:30:10**  
+   - **adapters.fa**: A FASTA file containing adapter sequences you want to remove. This could be Nextera, TruSeq, or any custom adapter file.  
+   - The numbers (`2:30:10`) represent:
+     - **2**: Maximum mismatch count allowed in the adapter sequence.
+     - **30**: Palindrome clip threshold.
+     - **10**: Simple clip threshold.
+
+2. **SLIDINGWINDOW:4:20**  
+   - **Window size of 4 bases**.  
+   - **Average quality threshold of 20** (Q20 ≈ 99% base call accuracy).
+
+3. **MINLEN:50**  
+   - Any read that ends up shorter than 50 bases after the above trimming steps is discarded.  
+   - Adjust based on your desired minimum read length.
 
 ---
 
-### Final Notes
+## 4. Checking Your Results
 
-1. **Check Output Quality**  
-   After trimming, run FastQC again to confirm adapter removal and improved base quality.
-2. **Adapt Parameters**  
-   Trimming parameters depend on your specific data (read length, quality distribution, adapter type).
-3. **Consistent Folder Organization**  
-   Store your trimmed files in a separate folder (e.g., `trimmed_data/`) or clearly label them (`trimmed_` prefix) to avoid confusion with raw reads.
+After running these scripts, you will have new FASTQ files labeled either `trimmed_` (single-end) or `_paired`/`_unpaired` (paired-end). To confirm improvements:
 
-By following these simple steps, you can ensure your data is free from adapters and low-quality regions, setting a solid foundation for reliable downstream analyses.
-```
+1. **Re-run FastQC** on the trimmed FASTQ files.
+2. Check if:
+   - **Adapter contamination** is gone or significantly reduced.  
+   - **Per Base Sequence Quality** is higher and more uniform.  
+   - **Sequence Length Distribution** still meets your downstream needs.
 
-**Instructions:**
-1. **Create a folder named `Trimming/`** in your repository.  
-2. **Copy the above content** into a file called `README.md` inside that folder.  
-3. **Adjust commands or file names** (e.g., references to `adapters.fa`, read length thresholds) according to your specific needs.  
+---
 
-You now have a **step-by-step, generalized guide** explaining how to trim FASTQ files (single-end or paired-end) based on FastQC results and adapter sequences.
+## Optional Steps
+
+- **Merging Overlapping Reads (FLASH)**: If you have short inserts that overlap significantly, you can use [FLASH](https://ccb.jhu.edu/software/FLASH/) on the paired reads after trimming:
+  ```bash
+  flash trimmed_sample_R1_paired.fastq.gz trimmed_sample_R2_paired.fastq.gz -o sample_merged -M 250
+  ```
+  - **-M 250** sets the maximum overlap to 250 bases (adjust as needed).
+
+- **Removing Duplicate Reads (fastuniq)**: If FastQC shows high duplication, you might use [fastuniq](https://sourceforge.net/projects/fastuniq/) to remove exact duplicates in paired-end data.
+
+---
+
+## Summary
+
+1. **Single-End**: Loop over files matching `*.fastq.gz` and run `trimmomatic SE`.  
+2. **Paired-End**: Loop over files matching `*_R1.fastq.gz` and run `trimmomatic PE` on each pair.  
+3. **Parameters**:  
+   - **ILLUMINACLIP** to remove adapter sequences.  
+   - **SLIDINGWINDOW** to trim low-quality regions dynamically.  
+   - **MINLEN** to discard reads below a certain length.  
+
+With these examples, you can efficiently trim all FASTQ files in your directory. Always review your FastQC reports to guide parameter decisions and confirm that trimming improves your data quality.
